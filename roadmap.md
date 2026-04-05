@@ -4,7 +4,7 @@ Ce document détaille les phases de développement pour transformer le prototype
 
 ---
 
-## État Actuel du Projet
+## État Actuel du Project
 
 ### Fonctionnalités Implémentées
 - [x] Interface utilisateur React (Tailwind CSS)
