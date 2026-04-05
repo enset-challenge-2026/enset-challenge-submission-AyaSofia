@@ -1,18 +1,15 @@
 # InternMatch AI
-
 **ENSET Challenge 2026 — IA Agentique pour l'Education**
 Equipe AyaSofia — Aya YOUSSFI & Sofia EL HARRASSE
 
 ---
 
 ## C'est quoi ?
-
 InternMatch AI connecte etudiants et entreprises grace a 3 agents IA autonomes bases sur Google Gemini. L'IA analyse le CV, identifie les lacunes, et recommande les offres les plus adaptees au profil de l'etudiant — de facon autonome.
 
 ---
 
 ## Les 3 Agents IA
-
 | Agent | Role |
 |-------|------|
 | CVAnalysisAgent | Analyse multimodale du CV (PDF/image) — extraction des competences, resume de profil, suggestions de carriere |
@@ -45,7 +42,6 @@ InternMatch AI connecte etudiants et entreprises grace a 3 agents IA autonomes b
 ---
 
 ## Stack Technique
-
 - Frontend : React + Vite + TypeScript + Tailwind CSS
 - Backend : Node.js + Express + TypeScript
 - Base de donnees : PostgreSQL + Prisma ORM
@@ -61,7 +57,6 @@ InternMatch AI connecte etudiants et entreprises grace a 3 agents IA autonomes b
 - Cle API Gemini : https://aistudio.google.com/apikey (gratuit)
 
 **Installation**
-
 ```bash
 git clone https://github.com/enset-challenge-2026/enset-challenge-submission-AyaSofia.git
 cd enset-challenge-submission-AyaSofia
@@ -74,14 +69,25 @@ Ouvre http://localhost dans le navigateur.
 
 **Comptes de test**
 
-| Role | Email | Mot de passe |
-|------|-------|--------------|
-| Etudiant | etudiant@test.com | password123 |
-| Entreprise | rh@techmaroc.ma | password123 |
+👤 Compte Étudiant
+| Champ | Valeur |
+|-------|--------|
+| Email | student@test.com |
+| Mot de passe | student123 |
+
+🏢 Compte Entreprise
+| Champ | Valeur |
+|-------|--------|
+| Email | company@test.com |
+| Mot de passe | company123 |
+
+🔧 Compte Administrateur
+| Champ | Valeur |
+|-------|--------|
+| Email | admin@internmatch.com |
+| Mot de passe | admin123 |
 
 ---
 
 ## Equipe AyaSofia — ENSET Challenge 2026
-
-- Aya YOUSSFI
-- Sofia EL HARRASSE
+Aya YOUSSFI & Sofia EL HARRASSE
