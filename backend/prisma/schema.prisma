@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String                  @id @default(uuid())
+  email                  String                  @unique
+  passwordHash           String
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  profile                Profile?
+  cvAnalyses             CVAnalysis[]
+  cvPerformanceAnalyses  CVPerformanceAnalysis[]
+  applications           Application[]
+  companyApplications    CompanyApplication[]
+}
+
+model Profile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  education String?
+  skills    String[]
+  interests String[]
+  location  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CVAnalysis {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName          String
+  summary           String
+  extractedSkills   String[]
+  careerSuggestions String[]
+  weaknesses        String[]
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+}
+
+model CVPerformanceAnalysis {
+  id                   String   @id @default(uuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName             String
+  overallScore         Int
+  atsScore             Int
+  atsIsReadable        Boolean
+  atsIssues            String[]
+  atsRecommendations   String[]
+  strengths            String[]
+  weaknesses           String[]
+  missingElements      String[]
+  suggestions          String[]
+  skillRecommendations Json[]
+  matchScore           Int
+  actionItems          String[]
+  createdAt            DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Application {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  internshipId    String
+  internshipTitle String
+  company         String
+  status          ApplicationStatus @default(APPLIED)
+  dateApplied     DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([userId, internshipId])
+  @@index([userId])
+}
+
+enum ApplicationStatus {
+  APPLIED
+  INTERVIEWING
+  REJECTED
+  ACCEPTED
+}
+
+// ===== Company Space Models =====
+
+model Company {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  passwordHash String
+  siret        String       @unique
+  name         String
+  sector       String?
+  description  String?
+  logoUrl      String?
+  website      String?
+  location     String?
+  verified     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  internships  Internship[]
+}
+
+model Internship {
+  id           String               @id @default(uuid())
+  companyId    String
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title        String
+  description  String
+  requirements String[]
+  skills       String[]
+  location     String
+  locationType LocationType         @default(ONSITE)
+  duration     String
+  compensation String?
+  startDate    DateTime?
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  applications CompanyApplication[]
+
+  @@index([companyId])
+  @@index([isActive])
+}
+
+model CompanyApplication {
+  id           String                   @id @default(uuid())
+  internshipId String
+  internship   Internship               @relation(fields: [internshipId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status       CompanyApplicationStatus @default(NEW)
+  coverLetter  String?
+  notes        String?
+  appliedAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  @@unique([internshipId, userId])
+  @@index([internshipId])
+  @@index([status])
+}
+
+enum LocationType {
+  REMOTE
+  ONSITE
+  HYBRID
+}
+
+enum CompanyApplicationStatus {
+  NEW
+  REVIEWING
+  SHORTLISTED
+  INTERVIEW
+  OFFER
+  ACCEPTED
+  REJECTED
+}

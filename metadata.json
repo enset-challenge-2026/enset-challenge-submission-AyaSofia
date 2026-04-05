@@ -1,0 +1,6 @@
+
+{
+  "name": "InternMatch AI",
+  "description": "An intelligent internship matching platform for students. It analyzes your CV using Gemini AI, suggests tailored opportunities, and manages your application history.",
+  "requestFramePermissions": []
+}
