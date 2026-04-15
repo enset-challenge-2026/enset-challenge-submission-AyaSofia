@@ -88,7 +88,7 @@ Points de contrôle humains pour les actions critiques :
 
 ---
 
-## 🔍 RAG Agentique (ChromaDB)
+## RAG Agentique (ChromaDB)
 
 Système de Retrieval-Augmented Generation pour un matching sémantique :
 
@@ -100,7 +100,7 @@ Système de Retrieval-Augmented Generation pour un matching sémantique :
 
 ---
 
-## ✨ Fonctionnalités
+##  Fonctionnalités
 
 **Espace Étudiant**
 - Authentification sécurisée JWT
