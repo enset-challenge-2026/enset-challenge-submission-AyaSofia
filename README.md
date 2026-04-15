@@ -184,7 +184,7 @@ services:
 
 ---
 
-## 🚀 Lancer le projet
+##  Lancer le projet
 
 **Prérequis**
 - [Docker Desktop](https://www.docker.com/get-started)
@@ -248,7 +248,7 @@ backend/src/
 
 ---
 
-## 👩‍💻 Équipe AyaSofia — ENSET Challenge 2026
+##  Équipe AyaSofia — ENSET Challenge 2026
 
 **Aya YOUSSFI & Sofia EL HARRASSE**  
 École Normale Supérieure de l'Enseignement Technique de Mohammedia  
