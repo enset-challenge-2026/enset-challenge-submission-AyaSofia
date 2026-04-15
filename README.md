@@ -56,7 +56,7 @@ InternMatch AI est un **écosystème intelligent** qui connecte étudiants et en
 
 ---
 
-## 🔒 Sécurité & Fiabilité
+##  Sécurité & Fiabilité
 
 ### Human-in-the-Loop (HITL)
 
