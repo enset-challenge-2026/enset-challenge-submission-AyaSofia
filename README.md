@@ -204,21 +204,20 @@ Ouvrir [http://localhost](http://localhost) dans le navigateur.
 
 ---
 
-## 🔑 Comptes de test
-
-👤 **Étudiant**
+##  Comptes de test
+ **Étudiant**
 | Champ | Valeur |
 |-------|--------|
 | Email | student@test.com |
 | Mot de passe | student123 |
 
-🏢 **Entreprise**
+ **Entreprise**
 | Champ | Valeur |
 |-------|--------|
 | Email | company@test.com |
 | Mot de passe | company123 |
 
-🔧 **Administrateur**
+ **Administrateur**
 | Champ | Valeur |
 |-------|--------|
 | Email | admin@internmatch.com |
@@ -251,5 +250,4 @@ backend/src/
 ##  Équipe AyaSofia — ENSET Challenge 2026
 
 **Aya YOUSSFI & Sofia EL HARRASSE**  
-École Normale Supérieure de l'Enseignement Technique de Mohammedia  
-Université Hassan II de Casablanca
+
