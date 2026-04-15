@@ -226,7 +226,7 @@ Ouvrir [http://localhost](http://localhost) dans le navigateur.
 
 ---
 
-## 📁 Structure du Projet
+## Structure du Projet
 
 ```
 backend/src/
