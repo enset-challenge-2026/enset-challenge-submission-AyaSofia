@@ -4,13 +4,13 @@
 
 ---
 
-## 🎯 C'est quoi ?
+##  C'est quoi ?
 
 InternMatch AI est un **écosystème intelligent** qui connecte étudiants et entreprises grâce à une architecture multi-agents orchestrée par LangChain.js. Le système raisonne, planifie et exécute des tâches complexes de manière autonome ou semi-autonome : analyse de CV, audit ATS, matching sémantique par RAG, et recommandations de carrière personnalisées.
 
 ---
 
-## 🤖 Architecture Agentique
+##  Architecture Agentique
 
 ### Workflow Multi-Agents
 
