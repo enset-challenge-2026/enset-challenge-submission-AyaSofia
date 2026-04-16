@@ -5,7 +5,7 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import Profile from './components/Profile';
-import CVPerformanceAnalyzer from './components/CVPerformanceAnalyzer';
+import CVAnalyzerPipeline from './components/CVAnalyzerPipeline';
 import InternshipFinder from './components/InternshipFinder';
 import History from './components/History';
 import AdminDashboard from './components/AdminDashboard';
@@ -135,7 +135,7 @@ const StudentAppContent: React.FC = () => {
           setCvAnalysis={setCvAnalysis}
         />;
       case AppTab.CV_ANALYZER:
-        return <CVPerformanceAnalyzer />;
+        return <CVAnalyzerPipeline />;
       case AppTab.FINDER:
         return <InternshipFinder
           profile={profile}

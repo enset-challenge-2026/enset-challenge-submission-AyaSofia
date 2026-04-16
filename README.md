@@ -40,6 +40,13 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
   - Retrieval sémantique des offres pertinentes (mistral-embed + cosine similarity)
   - Guardrails stricts (liste blanche/noire de sujets, anti prompt-injection)
   - Tolérance aux fautes d'orthographe, argot, franglais, darija
+  - Persistance de la conversation en `localStorage` (survit au reload)
+- ✅ **Pipeline Multi-Agents Mistral** (page CV Analyzer)
+  - **CV Analyzer** (Few-shot + ATS) : vérifie si le CV est lisible par un ATS, extrait nom/formation/compétences/expérience
+  - **Recommander** (Constrained) : enchaîné automatiquement si ATS OK, suggère ressources gratuites ou &lt; 500 MAD sur plateformes Maroc
+  - **Matcher** (Chain-of-Thought) : scoring pondéré 50/30/20 (compétences/expérience/formation) vs offres
+  - OCR hybride : PDF via `pdf-parse`, images via Pixtral vision
+  - Injection automatique de la conversation InternCoach dans le contexte des agents
 
 ### Espace Entreprise
 - ✅ Authentification entreprise (SIRET, nom, secteur)
@@ -177,6 +184,123 @@ Le system prompt impose :
 - `backend/src/config/env.ts` : `GEMINI_API_KEY` passé en `z.string().optional()`
 - L'analyse CV / matching / CV performance (Gemini) restent fonctionnels si `GEMINI_API_KEY` est fournie, sinon désactivés
 - Objectif à terme : tout migrer sur Mistral (Pixtral pour la vision CV, mistral-small pour le chat/matching)
+
+---
+
+## Pipeline Multi-Agents Mistral (CV Analyzer + Matcher + Recommender)
+
+Trois agents IA spécialisés chaînés après l'upload du CV, chacun utilisant une technique de *prompt engineering* différente.
+
+### Techniques de prompting
+
+| Agent | Technique | Why |
+|-------|-----------|-----|
+| **CV Analyzer** | **Few-shot learning** (2 exemples inline) | Force le modèle à copier la forme exacte attendue (JSON strict, détection ATS) |
+| **Matcher** | **Chain-of-Thought** (4 étapes explicites) | Force un raisonnement auditable avec pondération compétences 50 / expérience 30 / formation 20 |
+| **Recommender** | **Constrained prompting** (5 contraintes absolues) | Garantit ressources gratuites/<500 MAD, plateformes Maroc-friendly, anti-hallucination |
+
+Tous les agents utilisent `response_format: { type: 'json_object' }` pour garantir un JSON parseable, avec une température basse (0.1–0.3) pour un output déterministe.
+
+### Orchestrateur — flux `cv-pipeline`
+
+```
+Upload CV (PDF/image)
+      │
+      ▼
+┌────────────────────────────────────┐
+│  cvExtractorService                │
+│  • PDF → pdf-parse (local)         │
+│  • Image → Pixtral 12B (vision)    │
+└──────────────┬─────────────────────┘
+               │
+               ▼ texte CV
+┌────────────────────────────────────┐
+│  Agent 1 — CV Analyzer (Few-shot)  │
+│  → { ats_detectable, score_ats,    │
+│      nom, competences, formation,  │
+│      experience, raison... }       │
+└──────────────┬─────────────────────┘
+               │
+               ├── ats_detectable = false → STOP
+               │   (Recommender non exécuté)
+               │
+               ▼ ats_detectable = true
+┌────────────────────────────────────┐
+│  Agent 2 — Recommender (Constraints│
+│  + transcript InternCoach chat)    │
+│  → { competences_a_acquérir[],     │
+│      ressources_gratuites[],       │
+│      alternatives_locales[] }      │
+└──────────────┬─────────────────────┘
+               │
+               ▼
+  { analysis, recommendations, recommendationsSkipped }
+```
+
+### Helper partagé
+
+`backend/src/services/agents/mistralJsonClient.ts` — client Mistral avec :
+- `response_format: { type: 'json_object' }` (JSON mode)
+- `max_tokens` adaptatifs par agent
+- Parsing + validation
+- Gestion d'erreurs centralisée (`AppError`)
+
+### Endpoints
+
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| POST | `/api/ai/agents/cv-analyzer` | Agent seul — body JSON `{ cvContent }` |
+| POST | `/api/ai/agents/matcher` | Agent seul — body `{ jobOffer, studentProfile?, chatContext? }` |
+| POST | `/api/ai/agents/recommender` | Agent seul — body `{ studentProfile?, chatContext? }` |
+| POST | `/api/ai/agents/cv-pipeline` | Pipeline complet — `multipart/form-data` avec champ `cv` |
+
+Tous sont authentifiés par JWT.
+
+### Flux de données — conversation InternCoach → agents
+
+```
+ProfileChatbot (React state)
+     │
+     ▼ (à chaque message)
+services/chatStore.ts — localStorage
+     │
+     ▼ (au moment de l'appel agent)
+api.runCvPipeline(file) / runMatcherAgent(...) / runRecommenderAgent(...)
+     │
+     ▼ (auto-injection du transcript formaté)
+Backend agent service
+     │
+     ▼
+System prompt enrichi : "Conversation InternCoach: [...]"
+```
+
+**Contrats** :
+- Matcher utilise le chat comme *source complémentaire* (aspirations, contraintes, soft skills exprimées)
+- Recommender utilise le chat comme *source principale* (domaine visé, lacunes évoquées par l'étudiant lui-même)
+- Les deux peuvent être appelés sans chat (`{ includeChat: false }`) — fonctionnent alors sur le profil DB seul
+
+### Fichiers clés du pipeline
+
+| Fichier | Rôle |
+|---|---|
+| `backend/src/services/agents/mistralJsonClient.ts` | Helper JSON mode partagé |
+| `backend/src/services/agents/cvAnalyzerAgent.ts` | Few-shot ATS |
+| `backend/src/services/agents/matcherAgent.ts` | Chain-of-Thought scoring |
+| `backend/src/services/agents/recommenderAgent.ts` | Constrained recommendations |
+| `backend/src/services/agents/cvExtractorService.ts` | OCR hybride (pdf-parse + Pixtral) |
+| `backend/src/services/agents/cvPipelineOrchestrator.ts` | Orchestrateur (extract → analyze → reco) |
+| `backend/src/controllers/agentsController.ts` | Handlers + validation Zod |
+| `components/CVAnalyzerPipeline.tsx` | UI upload + affichage résultats |
+| `services/chatStore.ts` | Persistance localStorage + formatage transcript |
+
+### Dépendances ajoutées
+
+```json
+{
+  "pdf-parse": "^1.1.1",
+  "@types/pdf-parse": "^1.1.4"
+}
+```
 
 ---
 
@@ -494,9 +618,18 @@ cd backend && npm run seed:chroma:reset
 |---------|------|
 | `backend/src/services/mistralService.ts` | Client Mistral Chat + system prompt InternCoach (guardrails + tolérance linguistique) |
 | `backend/src/services/embeddingService.ts` | RAG in-memory : `mistral-embed` + index stages + cosine similarity |
+| `backend/src/services/agents/mistralJsonClient.ts` | Helper JSON mode partagé par les 3 agents |
+| `backend/src/services/agents/cvAnalyzerAgent.ts` | Agent Few-shot + ATS |
+| `backend/src/services/agents/matcherAgent.ts` | Agent Chain-of-Thought |
+| `backend/src/services/agents/recommenderAgent.ts` | Agent Constrained |
+| `backend/src/services/agents/cvExtractorService.ts` | OCR hybride (pdf-parse + Pixtral) |
+| `backend/src/services/agents/cvPipelineOrchestrator.ts` | Orchestrateur du pipeline CV |
 | `backend/src/controllers/profileChatController.ts` | Controller du chatbot (validation Zod + orchestration RAG→chat) |
+| `backend/src/controllers/agentsController.ts` | Controllers des 3 agents + pipeline |
+| `services/chatStore.ts` | Persistance conversation InternCoach (localStorage) |
 | `components/ProfileChatbot.tsx` | UI chatbot InternCoach + affichage offres RAG |
 | `components/Profile.tsx` | Page Profile simplifiée (chatbot uniquement) |
+| `components/CVAnalyzerPipeline.tsx` | UI pipeline multi-agents (upload + ATS + recommandations) |
 | `backend/src/agents/orchestrator.ts` | Orchestrateur LangChain |
 | `backend/src/agents/cvAnalyzerAgent.ts` | Agent analyse CV |
 | `backend/src/agents/matcherAgent.ts` | Agent matching |

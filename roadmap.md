@@ -20,6 +20,7 @@ Ce document détaille les phases de développement pour transformer le prototype
 - [x] Espace Entreprise complet ✅
 - [x] Analyseur de Performance CV (StageMatch IA) ✅
 - [x] Agent Étudiant InternCoach (Chatbot Mistral + RAG) ✅
+- [x] Pipeline Multi-Agents Mistral (CV Analyzer + Matcher + Recommender) ✅
 - [ ] Administration avancée
 - [ ] Fonctionnalités innovantes (Auto-Apply, Simulateur, Badges, etc.)
 - [ ] Vector Database pour matching sémantique (ChromaDB — actuellement RAG in-memory via mistral-embed)
@@ -304,6 +305,99 @@ Le system prompt contient :
 - `components/Profile.tsx` (page simplifiée, chatbot uniquement)
 - `services/api.ts` (méthode `profileChat`)
 - `docker-compose.yml` (variables Mistral)
+
+---
+
+## Phase 4.7 : Pipeline Multi-Agents Mistral (CV Analyzer + Matcher + Recommender) ✅ (Complété)
+
+Trois agents IA spécialisés orchestrés en pipeline, chacun exploitant une technique de *prompt engineering* différente.
+
+### Techniques de prompting utilisées
+
+| Agent | Technique | Paramètres |
+|-------|-----------|------------|
+| **CV Analyzer** | Few-shot learning + détection ATS | Temp 0.1, JSON mode, 2 exemples inline |
+| **Matcher** | Chain-of-Thought (CoT) | Temp 0.2, scoring pondéré 50/30/20 |
+| **Recommender** | Constrained prompting | Temp 0.3, 5 contraintes absolues (ressources gratuites/<500 MAD, plateformes Maroc, anti-hallucination, GMT+1) |
+
+### 4.7.1 Agent CV Analyzer (Few-shot + ATS)
+- [x] Service `backend/src/services/agents/cvAnalyzerAgent.ts`
+- [x] System prompt avec 2 exemples inline (CV bien formaté vs CV image-only)
+- [x] Sortie JSON strict : `{ nom, competences[], experience, formation, ats_detectable, score_ats, raison_non_detectable }`
+- [x] Détection des points bloquants ATS (tableaux, images, format non standard)
+
+### 4.7.2 Agent Matcher (Chain-of-Thought)
+- [x] Service `backend/src/services/agents/matcherAgent.ts`
+- [x] Prompt forçant un raisonnement en 4 étapes : compétences → expérience → formation → score pondéré
+- [x] Enrichissement par la transcription de la conversation InternCoach (contexte profilage)
+- [x] Sortie JSON strict : `{ score, justification }`
+
+### 4.7.3 Agent Recommender (Constrained)
+- [x] Service `backend/src/services/agents/recommenderAgent.ts`
+- [x] 5 contraintes absolues dans le system prompt
+- [x] Utilise la transcription InternCoach comme source principale d'aspirations
+- [x] Sortie JSON strict : `{ competences_a_acquérir[], ressources_gratuites[], alternatives_locales[] }`
+
+### 4.7.4 Orchestrateur Pipeline CV
+- [x] Service `backend/src/services/agents/cvPipelineOrchestrator.ts`
+- [x] Flux : **Upload → OCR (pdf-parse ou Pixtral) → CV Analyzer → (si ATS OK) Recommender**
+- [x] Short-circuit si `ats_detectable = false` (pas de reco sur un CV cassé)
+- [x] Injection automatique du chat InternCoach en contexte
+
+### 4.7.5 Extracteur texte CV
+- [x] Service `backend/src/services/agents/cvExtractorService.ts`
+- [x] PDF → `pdf-parse` (extraction locale, rapide, zéro appel API)
+- [x] Image (JPG/PNG) → **Pixtral 12B** (`pixtral-12b-2409`) via Mistral Vision
+- [x] Minimum 30 caractères extraits sinon erreur
+
+### 4.7.6 Infrastructure partagée
+- [x] Helper `backend/src/services/agents/mistralJsonClient.ts`
+  - Appel Mistral avec `response_format: { type: 'json_object' }`
+  - Temperature basse (0.1-0.3) pour output déterministe
+  - Parsing + validation du JSON retourné
+  - Gestion d'erreurs centralisée (401, 502, parse fail)
+
+### 4.7.7 Interface utilisateur
+- [x] Composant `components/CVAnalyzerPipeline.tsx` (remplace l'ancien CVPerformanceAnalyzer sur l'onglet CV Analyzer)
+- [x] Upload drag & drop (PDF, PNG, JPG)
+- [x] Bloc Agent 1 : score ATS coloré + détection + profil extrait (nom, formation, expérience, compétences)
+- [x] Bloc Agent 2 : compétences à acquérir + ressources gratuites + alternatives locales
+- [x] Si ATS NOK : message d'explication, pas de reco
+
+### 4.7.8 Persistance conversation InternCoach
+- [x] `services/chatStore.ts` : localStorage (max 40 messages)
+- [x] `formatChatAsTranscript()` — transcrit la conversation pour l'injecter dans les prompts
+- [x] Injection automatique dans `api.runMatcherAgent()`, `api.runRecommenderAgent()`, `api.runCvPipeline()`
+- [x] Opt-out possible via `{ includeChat: false }`
+
+### Endpoints
+
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| POST | `/api/ai/agents/cv-analyzer` | Agent seul — body `{ cvContent: string }` |
+| POST | `/api/ai/agents/matcher` | Agent seul — body `{ jobOffer, studentProfile?, chatContext? }` |
+| POST | `/api/ai/agents/recommender` | Agent seul — body `{ studentProfile?, chatContext? }` |
+| POST | `/api/ai/agents/cv-pipeline` | **Pipeline complet** — multipart upload `cv` + `chatContext` optionnel |
+
+### Dépendances ajoutées
+- `pdf-parse` (^1.1.1) — extraction texte PDF
+- `@types/pdf-parse` (^1.1.4)
+
+### Fichiers ajoutés / modifiés
+- `backend/src/services/agents/mistralJsonClient.ts` (nouveau)
+- `backend/src/services/agents/cvAnalyzerAgent.ts` (nouveau)
+- `backend/src/services/agents/matcherAgent.ts` (nouveau)
+- `backend/src/services/agents/recommenderAgent.ts` (nouveau)
+- `backend/src/services/agents/cvExtractorService.ts` (nouveau)
+- `backend/src/services/agents/cvPipelineOrchestrator.ts` (nouveau)
+- `backend/src/controllers/agentsController.ts` (nouveau)
+- `backend/src/routes/aiRoutes.ts` (routes `/agents/*`)
+- `backend/package.json` (`pdf-parse`)
+- `services/chatStore.ts` (nouveau — persistance chat localStorage)
+- `services/api.ts` (4 méthodes `runCvAnalyzerAgent`, `runMatcherAgent`, `runRecommenderAgent`, `runCvPipeline`)
+- `components/CVAnalyzerPipeline.tsx` (nouveau)
+- `components/ProfileChatbot.tsx` (sauvegarde localStorage)
+- `App.tsx` (tab CV Analyzer → `CVAnalyzerPipeline`)
 
 ---
 
