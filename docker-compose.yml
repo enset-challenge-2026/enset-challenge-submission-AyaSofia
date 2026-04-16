@@ -34,7 +34,8 @@ services:
       DATABASE_URL: postgresql://internmatch:${DB_PASSWORD:-internmatch_secret_2024}@db:5432/internmatch
       JWT_SECRET: ${JWT_SECRET:-change-this-to-a-secure-secret-min-32-chars}
       JWT_EXPIRES_IN: 7d
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
       FRONTEND_URL: http://localhost
     ports:
       - "5000:5000"

@@ -34,6 +34,12 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
   - Recommandations Dynamiques
   - Score de Match Marché
   - Actions Concrètes prioritaires
+- ✅ **Agent InternCoach — Chatbot Mistral + RAG** (page Profile)
+  - Conversation guidée pour enrichir le profil étudiant
+  - Questions progressives (formation → compétences → stage recherché → objectifs)
+  - Retrieval sémantique des offres pertinentes (mistral-embed + cosine similarity)
+  - Guardrails stricts (liste blanche/noire de sujets, anti prompt-injection)
+  - Tolérance aux fautes d'orthographe, argot, franglais, darija
 
 ### Espace Entreprise
 - ✅ Authentification entreprise (SIRET, nom, secteur)
@@ -67,6 +73,110 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
 - ✅ `service-worker.js` (cache offline, notifications push, background sync)
 - ✅ Installation automatique via `index.html`
 - ✅ Stratégies de cache (Cache-First pour assets, Network-First pour API)
+
+---
+
+## Agent InternCoach (Mistral + RAG) — Détails
+
+Agent conversationnel dédié à l'espace étudiant, intégré sur la page **Profile** (désormais consacrée au chatbot).
+
+### Pipeline de traitement d'un message
+
+```
+Étudiant (UI Profile)
+      │
+      ▼
+POST /api/ai/profile-chat  ── (auth JWT)
+      │
+      ▼
+┌────────────────────────────────────┐
+│  profileChatController             │
+│  • Valide la requête (Zod)         │
+│  • Charge profil + dernière        │
+│    CVAnalysis depuis Postgres      │
+└─────────────┬──────────────────────┘
+              │
+              ▼
+┌────────────────────────────────────┐
+│  embeddingService.retrieve...      │
+│  • Embed du dernier message user   │
+│    + hints du profil (mistral-embed│
+│  • Cosine vs index in-memory       │
+│    des Internship actifs           │
+│  • top-3 (seuil 0.25)              │
+└─────────────┬──────────────────────┘
+              │
+              ▼
+┌────────────────────────────────────┐
+│  mistralService.chatWithStudent    │
+│  • Build system prompt :           │
+│    - Mission stricte               │
+│    - Portée autorisée / interdite  │
+│    - Politique de refus            │
+│    - Tolérance linguistique        │
+│    - Profil connu (anti-redondance)│
+│    - Contexte RAG (top-3 stages)   │
+│  • mistral-small-latest, T=0.3     │
+└─────────────┬──────────────────────┘
+              │
+              ▼
+   { reply, retrieved[] }  ── UI
+```
+
+### Composants techniques
+
+| Composant | Fichier | Rôle |
+|-----------|---------|------|
+| Client Mistral Chat | `backend/src/services/mistralService.ts` | Appel direct `/v1/chat/completions` + system prompt |
+| Service RAG | `backend/src/services/embeddingService.ts` | `mistral-embed` + index in-memory + cosine |
+| Controller | `backend/src/controllers/profileChatController.ts` | Validation + orchestration |
+| Route | `backend/src/routes/aiRoutes.ts` | `POST /api/ai/profile-chat` |
+| UI chatbot | `components/ProfileChatbot.tsx` | Chat + affichage offres RAG |
+| Page Profile | `components/Profile.tsx` | Page dédiée (CV upload / personal info retirés) |
+| Client API | `services/api.ts` | `api.profileChat(messages)` |
+
+### Configuration
+
+```env
+MISTRAL_API_KEY=xxxx              # obligatoire
+MISTRAL_MODEL=mistral-small-latest  # par défaut
+GEMINI_API_KEY=xxxx               # désormais optionnel
+```
+
+Variables injectées dans `docker-compose.yml` (service `backend`).
+
+### Caractéristiques RAG
+
+- **Backend vectoriel** : in-memory (pas de ChromaDB requis pour cet agent)
+- **Modèle d'embedding** : `mistral-embed`
+- **Index** : top 200 Internship actifs, rebuild par batch de 32, cache TTL 10 min
+- **Recherche** : cosine similarity, seuil `score > 0.25`, top-3
+- **Requête composée** : dernier message user + hints profil (skills, interests, education, cvSkills)
+- **Fallback** : si retrieval échoue, le chat continue sans contexte (erreur loggée)
+
+### Guardrails (prompt engineering strict)
+
+Le system prompt impose :
+1. **Mission unique** : aide à la construction du profil + recherche de stage
+2. **Portée autorisée** explicitée (liste blanche) — profil, compétences, stage, carrière
+3. **Portée interdite** explicitée (liste noire) — devoirs, politique, santé, recettes, écriture créative, etc.
+4. **Format de refus fixe** : `"Désolé, je suis InternCoach... Je ne peux pas t'aider sur [X]. 👉 Revenons à ta recherche: ..."`
+5. **Anti prompt-injection** : refus explicite des tentatives de contournement
+6. **Anti-hallucination** : interdiction d'inventer des offres/entreprises hors contexte RAG
+7. **Tolérance linguistique** : comprend fautes, argot, darija, franglais — refus sur le sujet, pas sur la forme
+8. **Anti-redondance** : n'interroge pas sur des infos déjà présentes dans le profil
+
+### Endpoint
+
+| Méthode | Endpoint | Auth | Body | Réponse |
+|---------|----------|------|------|---------|
+| POST | `/api/ai/profile-chat` | JWT student | `{ messages: [{role, content}] }` | `{ success, data: { reply, retrieved[] } }` |
+
+### Migration Gemini → Mistral
+
+- `backend/src/config/env.ts` : `GEMINI_API_KEY` passé en `z.string().optional()`
+- L'analyse CV / matching / CV performance (Gemini) restent fonctionnels si `GEMINI_API_KEY` est fournie, sinon désactivés
+- Objectif à terme : tout migrer sur Mistral (Pixtral pour la vision CV, mistral-small pour le chat/matching)
 
 ---
 
@@ -255,14 +365,16 @@ Système de validation humaine pour les actions critiques.
 |-----------|-------------|
 | **Frontend** | React 19 + TypeScript + Tailwind CSS |
 | **Backend** | Node.js (Express) + TypeScript |
-| **IA Principale** | Google Gemini API |
+| **IA Principale (Agent InternCoach)** | **Mistral AI** (`mistral-small-latest` + `mistral-embed`) |
+| **IA héritée (CV Analyzer, Matching legacy)** | Google Gemini API (optionnel) |
 | **Framework Agentique** | LangChain.js |
 | **Orchestration** | Multi-agents (Orchestrator pattern) |
 | **Base de données** | PostgreSQL + Prisma |
-| **Vector Database** | ChromaDB (open source) |
+| **RAG vectoriel (agent InternCoach)** | In-memory cosine + `mistral-embed` |
+| **Vector Database (agents legacy)** | ChromaDB (open source) |
 | **Cache/Queue** | Redis |
 | **Conteneurisation** | Docker + Docker Compose |
-| **Sécurité IA** | Guardrails (Input/Output validators) |
+| **Sécurité IA** | Guardrails (Input/Output validators) + system prompt strict (InternCoach) |
 | **Contrôle Humain** | Human-in-the-Loop system |
 
 ---
@@ -380,6 +492,11 @@ cd backend && npm run seed:chroma:reset
 
 | Fichier | Rôle |
 |---------|------|
+| `backend/src/services/mistralService.ts` | Client Mistral Chat + system prompt InternCoach (guardrails + tolérance linguistique) |
+| `backend/src/services/embeddingService.ts` | RAG in-memory : `mistral-embed` + index stages + cosine similarity |
+| `backend/src/controllers/profileChatController.ts` | Controller du chatbot (validation Zod + orchestration RAG→chat) |
+| `components/ProfileChatbot.tsx` | UI chatbot InternCoach + affichage offres RAG |
+| `components/Profile.tsx` | Page Profile simplifiée (chatbot uniquement) |
 | `backend/src/agents/orchestrator.ts` | Orchestrateur LangChain |
 | `backend/src/agents/cvAnalyzerAgent.ts` | Agent analyse CV |
 | `backend/src/agents/matcherAgent.ts` | Agent matching |

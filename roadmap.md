@@ -19,9 +19,10 @@ Ce document détaille les phases de développement pour transformer le prototype
 ### Ce qui reste à faire (Nouveau Cahier des Charges)
 - [x] Espace Entreprise complet ✅
 - [x] Analyseur de Performance CV (StageMatch IA) ✅
+- [x] Agent Étudiant InternCoach (Chatbot Mistral + RAG) ✅
 - [ ] Administration avancée
 - [ ] Fonctionnalités innovantes (Auto-Apply, Simulateur, Badges, etc.)
-- [ ] Vector Database pour matching sémantique
+- [ ] Vector Database pour matching sémantique (ChromaDB — actuellement RAG in-memory via mistral-embed)
 
 ---
 
@@ -232,6 +233,77 @@ model Message {
   createdAt   DateTime @default(now())
 }
 ```
+
+---
+
+## Phase 4.6 : Agent Étudiant — InternCoach (Chatbot Mistral + RAG) ✅ (Complété)
+
+Premier agent IA conversationnel intégré à l'espace étudiant, entièrement propulsé par **Mistral AI**.
+
+### Objectif
+Discuter avec l'étudiant pour enrichir son profil (formation, compétences, intérêts, type de stage recherché, objectifs de carrière, contraintes) via une conversation guidée, puis remonter des offres de stages pertinentes par similarité sémantique (RAG).
+
+### 4.6.1 Chatbot conversationnel (Mistral Chat)
+- [x] Service `backend/src/services/mistralService.ts` : client direct API Mistral `/v1/chat/completions`
+- [x] Modèle par défaut : `mistral-small-latest` (configurable via `MISTRAL_MODEL`)
+- [x] Endpoint authentifié : `POST /api/ai/profile-chat`
+- [x] Historique multi-tours, température 0.3 pour plus de rigueur
+- [x] Injection automatique du profil connu dans le system prompt (évite les questions redondantes)
+
+### 4.6.2 RAG (Retrieval-Augmented Generation) — sans ChromaDB
+- [x] Service `backend/src/services/embeddingService.ts`
+- [x] Embeddings via `mistral-embed` API
+- [x] Index in-memory des stages actifs (top 200, rebuild batch de 32)
+- [x] Cache avec TTL 10 min + rebuild concurrent-safe
+- [x] Cosine similarity, seuil `score > 0.25`, top-3
+- [x] Requête composite : dernier message user + compétences/intérêts/formation du profil
+- [x] Fallback silencieux si retrieval échoue (chat reste fonctionnel)
+- [x] Injection des offres retrouvées dans le system prompt comme "Contexte RAG"
+
+### 4.6.3 Guardrails stricts (Prompt Engineering)
+Le system prompt contient :
+- [x] **MISSION STRICTE** : rôle unique défini
+- [x] **PORTÉE AUTORISÉE** : liste blanche des sujets (profil, formation, compétences, stage, carrière, candidature)
+- [x] **PORTÉE INTERDITE** : liste noire explicite (devoirs, politique, santé, recettes, écriture créative, etc.)
+- [x] **COMPORTEMENT DE REFUS** : format de réponse fixe avec relance vers le profil/stage
+- [x] **Anti prompt-injection** : refus explicite des tentatives ("ignore tes instructions", "joue le rôle de...")
+- [x] **TOLÉRANCE LINGUISTIQUE** : compréhension des fautes d'orthographe, argot, darija, franglais — refus uniquement sur le sujet, jamais sur la forme
+- [x] Anti-hallucination : interdiction d'inventer des offres/entreprises absentes du contexte RAG
+
+### 4.6.4 Interface utilisateur
+- [x] Composant `components/ProfileChatbot.tsx`
+- [x] Intégré dans la page **Profile** étudiant (page dédiée au chatbot, upload CV et personal info retirés)
+- [x] UI : bulles de messages, loader animé, Entrée pour envoyer, Maj+Entrée pour nouvelle ligne
+- [x] Bouton "Recommencer" pour reset
+- [x] Encart **"Offres pertinentes (RAG)"** affichant titre + entreprise + localisation + score de similarité en %
+- [x] Client API `api.profileChat(messages)` dans `services/api.ts`
+
+### 4.6.5 Configuration & Sécurité
+- [x] `MISTRAL_API_KEY` dans `backend/src/config/env.ts` (validation Zod, obligatoire)
+- [x] `MISTRAL_MODEL` configurable (`mistral-small-latest` par défaut)
+- [x] `GEMINI_API_KEY` devenue optionnelle (migration progressive vers tout-Mistral)
+- [x] `docker-compose.yml` mis à jour (injection des variables Mistral)
+- [x] `backend/.env.example` documenté
+- [x] Rate limiting desserré en dev (1000 req / 15 min) vs prod (100 req / 15 min)
+- [x] Validation Zod des messages côté controller (max 40 messages, 4000 chars)
+
+### Endpoints
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| POST | `/api/ai/profile-chat` | Envoi d'un historique de messages, retour `{ reply, retrieved[] }` |
+
+### Fichiers ajoutés / modifiés
+- `backend/src/services/mistralService.ts` (nouveau)
+- `backend/src/services/embeddingService.ts` (nouveau)
+- `backend/src/controllers/profileChatController.ts` (nouveau)
+- `backend/src/routes/aiRoutes.ts` (ajout route)
+- `backend/src/config/env.ts` (Mistral + Gemini optionnel)
+- `backend/src/app.ts` (rate limit dev)
+- `backend/.env.example` (documentation)
+- `components/ProfileChatbot.tsx` (nouveau)
+- `components/Profile.tsx` (page simplifiée, chatbot uniquement)
+- `services/api.ts` (méthode `profileChat`)
+- `docker-compose.yml` (variables Mistral)
 
 ---
 
