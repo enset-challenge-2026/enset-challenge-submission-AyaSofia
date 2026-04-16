@@ -8,7 +8,16 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
 
 **Objectif** : Écosystème intelligent et interactif capable de raisonner, planifier et exécuter des tâches complexes de manière autonome ou semi-autonome.
 
+### Critères d'Évaluation
+| Critère | Poids | Statut |
+|---------|-------|--------|
+| Innovation & Impacts | 30% | ✅ |
+| Qualité Technique & Orchestration | 25% | ✅ |
+| Sécurité & Fiabilité (Guardrails/HITL) | 20% | ✅ |
+| Interfaces (UI Web & Mobile) | 15% | ✅ Web / ✅ PWA Mobile |
+| Présentation & Démo Live | 10% | ✅ |
 
+---
 
 ## Fonctionnalités Implémentées
 
@@ -44,6 +53,18 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
   - Top 5 offres ranked avec justification Chain-of-Thought dépliable
   - Badges d'état "Analyse CV disponible" / "Conversation InternCoach disponible" pour transparence
   - Garde-fou : refus si profil trop vide (invite à uploader CV ou discuter avec InternCoach)
+- ✅ **Human-in-the-Loop — Candidature assistée** (page Finder)
+  - Agent Mistral rédige une lettre de motivation personnalisée (profil + CV + chat + offre)
+  - Modal dédié avec édition libre, regénération, restauration de l'original
+  - **Validation humaine obligatoire** avant envoi — aucune candidature sans click explicite
+  - Badges visibles `Human-in-the-Loop` + `Agent Mistral` + bandeau d'information
+  - Coexiste avec le flux manuel classique (double bouton par carte)
+- ✅ **Guardrails de Sécurité IA** (infrastructure transverse)
+  - **Input Guardrails** : détection prompt injection, SQLi, XSS, path traversal avant l'appel aux agents
+  - **Output Filter** : masquage auto PII (`[MASKED_EMAIL]` / `[MASKED_PHONE]` / `[MASKED_CIN]` / `[MASKED_IBAN]` / `[MASKED_CARD]`)
+  - **Détection de biais** : 7 catégories (GENDER, AGE, ORIGIN, DISABILITY, RELIGION, APPEARANCE, MARITAL_STATUS) avec sévérité + confidence
+  - **Blocage d'actions sensibles** : l'agent ne peut pas suggérer une suppression CV/candidature/compte
+  - **Confirmation destructive obligatoire** : DELETE sur candidatures/stages renvoie 428 sans header explicite
 
 ### Espace Entreprise
 - ✅ Authentification entreprise (SIRET, nom, secteur)
@@ -176,6 +197,69 @@ Le system prompt impose :
 |---------|----------|------|------|---------|
 | POST | `/api/ai/profile-chat` | JWT student | `{ messages: [{role, content}] }` | `{ success, data: { reply, retrieved[] } }` |
 
+### Guardrails de Sécurité IA — Détails
+
+Trois modules indépendants dans `backend/src/guardrails/` pour sécuriser toutes les interactions LLM et les opérations destructrices. Conçus comme des checkpoints obligatoires autour de chaque appel agent.
+
+```
+Client  ───(input)──▶  Input Guardrails  ───▶  Agent Mistral  ───▶  Output Filter  ───▶  Client
+                        ├─ Prompt injection                         ├─ PII masking
+                        ├─ SQL injection                            ├─ Bias detection
+                        ├─ XSS                                      ├─ Sensitive action block
+                        └─ Path traversal                           └─ Warnings[]
+```
+
+**Input Guardrails** (`inputGuardrails.ts`)
+- Détection par regex à plusieurs niveaux de sévérité (`low` / `medium` / `high` / `critical`)
+- `severity >= high` → blocage immédiat avec erreur 400 contenant le détail de la menace
+- `low/medium` → warning remonté au client dans le champ `guardrails.inputWarnings`
+- Sanitization HTML systématique (escape `<>&"'`) sur toute entrée
+- Patterns multilingues (français + anglais) pour le prompt injection
+
+**Output Filter** (`outputFilter.ts`)
+- **PII masking** : 5 types (`EMAIL`, `PHONE_MA`, `PHONE_FR`, `CIN_MA`, `IBAN`, `CREDIT_CARD`) masqués systématiquement dans la sortie LLM
+- **Détection de biais** : 7 catégories avec `{ type, severity, confidence, snippet, explanation }`
+  - Confidence calculée selon la spécificité du match (0.5 à 1.0)
+  - Overall severity = max des findings individuelles
+- **Sensitive action blocker** : si l'agent tente de recommander une action destructive (supprimer CV/candidature, bannir compte, drop table), la sortie est remplacée par un message générique et `sensitiveActionBlocked: true`
+
+Retour structuré :
+```ts
+{
+  cleanedOutput: string,
+  piiMasked: PIIMatch[],
+  biasReport: {
+    detected: boolean,
+    findings: BiasFinding[],
+    overallSeverity: Severity | null
+  },
+  warnings: string[],
+  sensitiveActionBlocked: boolean
+}
+```
+
+**Sensitive Actions Middleware** (`sensitiveActions.ts`)
+- Express middleware `requireDestructiveConfirmation`
+- Applique aux routes DELETE : `/api/applications/:id`, `/api/company/internships/:id`
+- Retour HTTP **428 Precondition Required** si aucune confirmation fournie
+- 3 canaux de confirmation acceptés :
+  - Header `x-confirm-destructive: true`
+  - Body `{ confirmDestructive: true }`
+  - Query `?confirm=true`
+- Log console systématique (audit trail)
+- Côté client : `api.deleteApplication` / `api.deleteInternship` envoient automatiquement le header
+
+**Points d'intégration**
+| Service | Input | Output |
+|---------|-------|--------|
+| `profileChatController` (chatbot) | ✅ scan chaque message user | ✅ filter reply |
+| `mistralJsonClient` (CV Analyzer / Matcher / Recommender) | ✅ scan tous les messages | — (JSON validé par les schémas Zod en aval) |
+| `coverLetterAgent` (HITL) | ✅ scan chatContext | ✅ filter draft |
+
+Les résultats des guardrails sont exposés côté API dans la clé `guardrails` de la réponse, permettant au frontend de les afficher pour transparence.
+
+---
+
 ### Migration Gemini → Mistral
 
 - `backend/src/config/env.ts` : `GEMINI_API_KEY` passé en `z.string().optional()`
@@ -251,8 +335,24 @@ Upload CV (PDF/image)
 | POST | `/api/ai/agents/recommender` | Agent seul — body `{ studentProfile?, chatContext? }` |
 | POST | `/api/ai/agents/cv-pipeline` | Pipeline complet — `multipart/form-data` avec champ `cv` |
 | POST | `/api/ai/agents/find-matches` | **AI Matcher end-to-end** — RAG shortlist + CoT parallèle, body `{ cvAnalysis?, chatContext?, limit? }` |
+| POST | `/api/ai/agents/draft-cover-letter` | **Agent HITL** — rédige une lettre de motivation pour validation humaine, body `{ internshipId, cvAnalysis?, chatContext? }` |
 
 Tous sont authentifiés par JWT.
+
+### Human-in-the-Loop — Candidature assistée
+
+Pour chaque offre matchée sur le Finder, l'étudiant a le choix entre :
+- **"Postuler manuellement"** — flux standard sans lettre
+- **"Candidater avec l'agent (HITL)"** — ouvre un modal où l'agent Cover Letter Writer rédige une proposition
+
+Étapes du flux HITL :
+1. Frontend appelle `POST /api/ai/agents/draft-cover-letter` avec `internshipId` (+ injection auto du CV analysis + transcript chat en localStorage)
+2. Agent Mistral génère une lettre (150-250 mots, 8 contraintes strictes : structure, ton, anti-invention, pas de formules creuses)
+3. Output passe par Output Filter (PII masking, détection de biais) avant retour au client
+4. Modal affiche la lettre dans un textarea éditable + 4 actions : **Approuver et envoyer**, **Regénérer**, **Restaurer l'original**, **Annuler**
+5. Sur approbation, le frontend appelle `POST /api/internships/:id/apply` avec la cover letter validée
+
+**Garantie clé** : aucune candidature n'est envoyée sans click explicite de l'utilisateur sur "Approuver et envoyer". L'agent propose, l'humain dispose.
 
 ### AI Matcher End-to-End — stratégie à deux étages
 
@@ -631,6 +731,12 @@ cd backend && npm run seed:chroma:reset
 |---------|------|
 | `backend/src/services/mistralService.ts` | Client Mistral Chat + system prompt InternCoach (guardrails + tolérance linguistique) |
 | `backend/src/services/embeddingService.ts` | RAG in-memory : `mistral-embed` + index stages + cosine similarity |
+| `backend/src/guardrails/inputGuardrails.ts` | Input Guardrails (prompt injection, SQLi, XSS, path traversal) |
+| `backend/src/guardrails/outputFilter.ts` | Output Filter (PII masking, bias detection, sensitive action block) |
+| `backend/src/guardrails/sensitiveActions.ts` | Middleware confirmation destructive |
+| `backend/src/guardrails/types.ts` | Enums Severity, BiasType, ThreatType, PIIKind |
+| `backend/src/services/agents/coverLetterAgent.ts` | Agent HITL — lettre de motivation + filtrage |
+| `components/HITLApplyModal.tsx` | UI validation humaine avant envoi de candidature |
 | `backend/src/services/agents/mistralJsonClient.ts` | Helper JSON mode partagé par les 3 agents |
 | `backend/src/services/agents/cvAnalyzerAgent.ts` | Agent Few-shot + ATS |
 | `backend/src/services/agents/matcherAgent.ts` | Agent Chain-of-Thought |

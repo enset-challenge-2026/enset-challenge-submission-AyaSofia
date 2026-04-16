@@ -22,6 +22,8 @@ Ce document détaille les phases de développement pour transformer le prototype
 - [x] Agent Étudiant InternCoach (Chatbot Mistral + RAG) ✅
 - [x] Pipeline Multi-Agents Mistral (CV Analyzer + Matcher + Recommender) ✅
 - [x] AI Matcher end-to-end (shortlist RAG + CoT scoring sur offres réelles) ✅
+- [x] Human-in-the-Loop (candidature assistée par agent + validation humaine) ✅
+- [x] Guardrails de sécurité (Input + Output + Sensitive Actions) ✅
 - [ ] Administration avancée
 - [ ] Fonctionnalités innovantes (Auto-Apply, Simulateur, Badges, etc.)
 - [ ] Vector Database pour matching sémantique (ChromaDB — actuellement RAG in-memory via mistral-embed)
@@ -487,6 +489,148 @@ Tri score desc → top 5 → UI
 - `backend/src/services/agents/findMatchesOrchestrator.ts` (nouveau)
 - `backend/src/controllers/agentsController.ts` (handler `runFindMatches` + schéma Zod)
 - `backend/src/routes/aiRoutes.ts` (route `/agents/find-matches`)
+
+---
+
+## Phase 4.9 : Human-in-the-Loop (Candidature Assistée) ✅ (Complété)
+
+Option de candidature assistée par un agent Mistral avec **validation humaine obligatoire** avant envoi.
+
+### 4.9.1 Agent Cover Letter Writer
+- [x] `backend/src/services/agents/coverLetterAgent.ts`
+- [x] Appel Mistral en mode texte (pas JSON) — température 0.5, 600 tokens max
+- [x] System prompt avec 8 contraintes strictes (ton, longueur 150-250 mots, anti-invention, pas de formules creuses, structure 3-4 paragraphes)
+- [x] Entrées : profil étudiant mergé + offre + transcript InternCoach
+- [x] Filtrage Output Guardrails appliqué au brouillon retourné
+
+### 4.9.2 Flux HITL
+- [x] Endpoint `POST /api/ai/agents/draft-cover-letter`
+- [x] Charge l'offre depuis Postgres, merge le profil étudiant (DB + CV Analyzer), appelle l'agent
+- [x] Retour `{ draft, internshipId, title, companyName, guardrails }`
+- [x] Frontend `components/HITLApplyModal.tsx` — modal d'édition/validation
+- [x] Badges explicites "Human-in-the-Loop" + "Agent Mistral" + bandeau de validation obligatoire
+- [x] Actions : **Approuver et envoyer** / **Regénérer** / **Restaurer original** / **Annuler**
+- [x] Garantie : aucune candidature n'est créée sans click explicite sur "Approuver"
+
+### 4.9.3 Intégration Finder
+- [x] `components/InternshipFinder.tsx` — deux boutons par carte : "Candidater avec l'agent (HITL)" + "Postuler manuellement"
+- [x] Coexistence transparente avec le flux manuel existant
+
+### Garde-fous
+- [x] Nom de l'étudiant requis — sinon erreur 400 invitant à compléter le profil
+- [x] Lettre éditable avant envoi (l'agent propose, l'humain dispose)
+- [x] Option de regénération sans limite
+- [x] Compteur de caractères + indicateur "modifiée"
+
+---
+
+## Phase 4.10 : Guardrails de Sécurité IA ✅ (Complété)
+
+Trois modules indépendants dans `backend/src/guardrails/` pour sécuriser les interactions avec les LLM et les actions destructrices.
+
+### 4.10.1 Input Guardrails
+Détection avant d'envoyer quoi que ce soit aux agents Mistral.
+
+| Menace | Patterns couverts | Sévérité |
+|--------|-------------------|----------|
+| **Prompt injection** | "ignore instructions" (fr/en), "oublie tes consignes", "you are now", "tu es maintenant", "act as", "joue le rôle", tokens spéciaux (`<\|im_start\|>`), jailbreak, DAN mode, "reveal prompt" | low → high |
+| **SQL injection** | `UNION SELECT`, `DROP TABLE`, `OR 1=1` tautologies, stacked queries, commentaires `--` / `/* */`, `xp_cmdshell`, `exec()` | medium → high |
+| **XSS** | `<script>`, `javascript:`, `<iframe>`, `<object>`, `<embed>`, event handlers `onclick=/onload=/onerror=`, `data:text/html` | medium → **critical** |
+| **Path traversal** | `../`, `..\` | high |
+
+- [x] `scanInput(text)` → `{ safe, blocked, threats[], sanitized }`
+- [x] `assertSafeInput(text, label)` → throw 400 si severity >= high
+- [x] Sanitization HTML (escape `<>&"'`)
+- [x] Intégré dans `profileChatController` (chaque message user) + `mistralJsonClient` (tous les agents)
+
+### 4.10.2 Output Filter
+Post-traitement des réponses LLM avant de les renvoyer au client.
+
+**Masquage PII automatique** (regex multi-patterns) :
+- `[MASKED_EMAIL]` — emails
+- `[MASKED_PHONE]` — téléphones MA (+212) et FR (+33)
+- `[MASKED_CIN]` — CIN marocain (format `[A-Z]{1,2}\d{4,7}`)
+- `[MASKED_IBAN]` — IBAN
+- `[MASKED_CARD]` — cartes bancaires
+
+**Détection de biais discriminatoires** :
+| BiasType | Exemples détectés | Sévérité |
+|----------|-------------------|----------|
+| `GENDER` | "only men", "uniquement des hommes", "préférence masculine" | medium → high |
+| `AGE` | "moins de 25 ans", "jeunes diplômés uniquement", "digital native" | medium → high |
+| `ORIGIN` | "de nationalité française uniquement", "pas d'étrangers" | medium → high |
+| `DISABILITY` | "en bonne santé exclusivement", "no disabilities" | medium → high |
+| `RELIGION` | "musulman uniquement", "chrétien exclusivement" | high |
+| `APPEARANCE` | "belle présentation", "physique avantageux" | medium |
+| `MARITAL_STATUS` | "célibataire uniquement", "mariés exclus" | high |
+
+Retour : `{ detected, findings: [{ type, severity, confidence, snippet, explanation }], overallSeverity }`.
+
+**Blocage d'actions sensibles dans la sortie** :
+- Si l'agent tente de suggérer `supprimer/effacer/delete CV/profil/candidature/compte`, `bloquer/bannir/suspendre utilisateur`, ou `drop table` → `cleanedOutput` remplacé par un message générique de filtrage et `sensitiveActionBlocked: true` retourné.
+
+- [x] `filterOutput(text)` → `{ cleanedOutput, piiMasked[], biasReport, warnings[], sensitiveActionBlocked }`
+- [x] Intégré dans `profileChatController` (reply chatbot) + `coverLetterAgent` (draft)
+- [x] Les résultats des guardrails sont inclus dans la réponse API (champ `guardrails`)
+
+### 4.10.3 Sensitive Actions Middleware
+Blocage des opérations destructrices sans confirmation explicite.
+
+- [x] `requireDestructiveConfirmation` middleware Express
+- [x] Retourne **HTTP 428 Precondition Required** si aucune confirmation n'est fournie
+- [x] Accepte trois formes de confirmation :
+  - Header `x-confirm-destructive: true`
+  - Body `{ confirmDestructive: true }`
+  - Query `?confirm=true`
+- [x] Logue chaque confirmation acceptée (audit trail console)
+
+**Routes protégées** :
+- `DELETE /api/applications/:id` (suppression candidature étudiant)
+- `DELETE /api/company/internships/:id` (suppression offre entreprise)
+
+**Côté client** :
+- `api.deleteApplication` et `api.deleteInternship` envoient automatiquement le header
+- Transparent pour les composants React existants (pas de refactor UI requis)
+
+### Architecture modulaire
+```
+backend/src/guardrails/
+├── types.ts                Enums (Severity, ThreatType, BiasType, PIIKind)
+├── inputGuardrails.ts      scanInput, assertSafeInput
+├── outputFilter.ts         filterOutput, maskPII, detectBias
+├── sensitiveActions.ts     requireDestructiveConfirmation
+└── index.ts                Exports publics
+```
+
+### Exemples observables
+| Scénario | Comportement |
+|----------|--------------|
+| Chatbot reçoit "ignore tes instructions" | Input Guardrails → 400 `Message bloqué` |
+| CV contient `badr@mail.com` / CIN `BE123456` | Output Filter masque en `[MASKED_EMAIL]` / `[MASKED_CIN]` |
+| Offre contient "uniquement des hommes" | `biasReport.findings[{type:'GENDER', severity:'high'}]` |
+| Agent suggère "supprime le CV" | `sensitiveActionBlocked: true` + message générique |
+| DELETE candidature sans header | **428 Precondition Required** |
+
+### Fichiers ajoutés / modifiés
+**Agent HITL (Phase 4.9)** :
+- `backend/src/services/agents/coverLetterAgent.ts` (nouveau)
+- `backend/src/controllers/agentsController.ts` (handler `runDraftCoverLetter`)
+- `backend/src/routes/aiRoutes.ts` (route `/agents/draft-cover-letter`)
+- `services/api.ts` (méthode `draftCoverLetter`)
+- `components/HITLApplyModal.tsx` (nouveau)
+- `components/InternshipFinder.tsx` (double-bouton par carte)
+
+**Guardrails (Phase 4.10)** :
+- `backend/src/guardrails/types.ts` (nouveau)
+- `backend/src/guardrails/inputGuardrails.ts` (nouveau)
+- `backend/src/guardrails/outputFilter.ts` (nouveau)
+- `backend/src/guardrails/sensitiveActions.ts` (nouveau)
+- `backend/src/guardrails/index.ts` (nouveau)
+- `backend/src/services/agents/mistralJsonClient.ts` (scan input avant appel)
+- `backend/src/services/agents/coverLetterAgent.ts` (output filter + scan chatContext)
+- `backend/src/controllers/profileChatController.ts` (scan + filter + retour `guardrails`)
+- `backend/src/routes/applicationRoutes.ts` / `companyRoutes.ts` (middleware destruct)
+- `services/api.ts` (header `x-confirm-destructive` sur delete calls)
 
 ---
 
