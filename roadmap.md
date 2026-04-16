@@ -24,6 +24,7 @@ Ce document détaille les phases de développement pour transformer le prototype
 - [x] AI Matcher end-to-end (shortlist RAG + CoT scoring sur offres réelles) ✅
 - [x] Human-in-the-Loop (candidature assistée par agent + validation humaine) ✅
 - [x] Guardrails de sécurité (Input + Output + Sensitive Actions) ✅
+- [x] Agents IA côté Entreprise (classement candidats + contact en un clic) ✅
 - [ ] Administration avancée
 - [ ] Fonctionnalités innovantes (Auto-Apply, Simulateur, Badges, etc.)
 - [ ] Vector Database pour matching sémantique (ChromaDB — actuellement RAG in-memory via mistral-embed)
@@ -631,6 +632,79 @@ backend/src/guardrails/
 - `backend/src/controllers/profileChatController.ts` (scan + filter + retour `guardrails`)
 - `backend/src/routes/applicationRoutes.ts` / `companyRoutes.ts` (middleware destruct)
 - `services/api.ts` (header `x-confirm-destructive` sur delete calls)
+
+---
+
+## Phase 4.11 : Agents IA côté Entreprise ✅ (Complété)
+
+Deux agents Mistral dédiés à l'espace recruteur pour industrialiser le tri et le contact des candidats.
+
+### 4.11.1 Agent Candidate Ranker (Point 2)
+> "L'Agent Matcher classe automatiquement les candidats par score, du plus pertinent au moins pertinent."
+
+- [x] Service `backend/src/services/agents/candidateRankerAgent.ts`
+- [x] Charge toutes les candidatures d'une offre depuis Postgres
+- [x] Vérification d'**ownership** : `internship.company.id === req.user.userId` (403 sinon)
+- [x] Exécute le **Matcher Chain-of-Thought** en parallèle (`Promise.all`) pour chaque couple (profil étudiant, offre)
+- [x] Tri décroissant par score, gestion des échecs isolés (offre continue même si 1 call plante)
+- [x] Retour : `{ internshipTitle, totalApplications, ranked: [{ applicationId, score, justification, ... }], failures }`
+
+### 4.11.2 Agent Contact Message (Point 3)
+> "Le manager contacte un candidat en un clic, sans formulaire complexe."
+
+- [x] Service `backend/src/services/agents/contactMessageAgent.ts`
+- [x] 5 types de messages prédéfinis avec `intent` / `tone` / `instructions` distincts :
+  | Type | Ton | Usage |
+  |------|-----|-------|
+  | `INVITATION_INTERVIEW` | Chaleureux et professionnel | Invitation à un entretien |
+  | `MAKE_OFFER` | Enthousiaste et clair | Proposition de stage |
+  | `REQUEST_INFO` | Poli et concis | Demande d'informations |
+  | `FOLLOW_UP` | Courtois et léger | Relance candidat |
+  | `POLITE_REJECTION` | Respectueux et bienveillant | Refus poli |
+- [x] Mode JSON strict (`response_format: { type: 'json_object' }`) → retour `{ subject, body }`
+- [x] 8 contraintes dans le system prompt (longueur 80-150 mots corps, anti-promesses non confirmées, anti-biais discriminatoire, signature générique `[Équipe {company}]`)
+- [x] Champ facultatif `extraNote` pour guider l'agent (ex: "visio Teams", "tuto obligatoire")
+- [x] Input Guardrails appliqués sur `extraNote` avant l'appel
+- [x] Output Filter (PII + biais + actions sensibles) appliqué sur `subject` ET `body`
+
+### 4.11.3 Endpoints
+
+| Méthode | Endpoint | Body | Auth |
+|---------|----------|------|------|
+| POST | `/api/company/agents/rank-candidates` | `{ internshipId }` | JWT company |
+| POST | `/api/company/agents/draft-contact-message` | `{ applicationId, type, extraNote? }` | JWT company |
+
+### 4.11.4 Interface entreprise (onglet Applications)
+
+**Classement IA** :
+- [x] Sélecteur d'offre + bouton **"Classer par IA"** en en-tête du Kanban
+- [x] Badge score coloré sur chaque carte candidat (🟢 ≥75% · 🟡 ≥50% · ⚪ <50%)
+- [x] Tri automatique par score dans chaque colonne une fois le ranking lancé
+- [x] Les échecs individuels ne bloquent pas l'affichage des candidats notés
+
+**Contact en un clic** :
+- [x] `components/company/ContactCandidateModal.tsx`
+- [x] Bouton "Contacter" au bas de chaque carte candidat
+- [x] **Grille de 5 boutons** (1 par type) — sélection = génération immédiate
+- [x] Note optionnelle pour l'agent avant génération
+- [x] Édition libre du brouillon (objet + corps)
+- [x] 2 actions finales : **Copier dans presse-papier** (pour client email externe) + **Enregistrer comme note** (sur la candidature, avec merge sur notes existantes)
+- [x] Badges `Agent Mistral · Contact` + `HITL` visibles
+
+### 4.11.5 Sécurité
+- [x] Ownership check systématique (candidature et offre doivent appartenir à la société connectée)
+- [x] Guardrails hérités : Input scan, Output filter, PII masking, bias detection
+- [x] Aucun message n'est envoyé automatiquement : le manager copie ou enregistre manuellement après approbation
+
+### Fichiers ajoutés / modifiés
+- `backend/src/services/agents/candidateRankerAgent.ts` (nouveau)
+- `backend/src/services/agents/contactMessageAgent.ts` (nouveau)
+- `backend/src/controllers/companyAgentsController.ts` (nouveau)
+- `backend/src/routes/companyRoutes.ts` (2 nouvelles routes)
+- `services/api.ts` (méthodes `rankCandidates`, `draftContactMessage`)
+- `components/company/ContactCandidateModal.tsx` (nouveau)
+- `components/company/ApplicationCard.tsx` (badge score + bouton Contacter)
+- `components/company/ApplicationKanban.tsx` (sélecteur offre + bouton IA + tri par score + intégration modal)
 
 ---
 

@@ -75,6 +75,17 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
 - ✅ Drag & drop pour changer de statut
 - ✅ Notes internes par candidat
 - ✅ Vue détail profil candidat
+- ✅ **Agent Candidate Ranker — Classement IA automatique** (Point 2)
+  - Bouton "Classer par IA" par offre
+  - Matcher Chain-of-Thought exécuté en parallèle sur toutes les candidatures
+  - Badge score coloré (vert/ambre/gris) sur chaque carte candidat
+  - Tri automatique du plus pertinent au moins pertinent dans chaque colonne Kanban
+- ✅ **Agent Contact Message — Contact en un clic** (Point 3)
+  - Bouton "Contacter" sur chaque carte candidat
+  - Modal avec 5 types de messages prédéfinis (invitation entretien, proposition, demande infos, relance, refus poli)
+  - Message généré en un clic par l'agent Mistral, éditable avant envoi
+  - Copie dans presse-papier OU enregistrement comme note interne
+  - Sans formulaire complexe : manager choisit un type → message prêt
 
 ### Espace Admin
 - ✅ Dashboard administrateur
@@ -196,6 +207,48 @@ Le system prompt impose :
 | Méthode | Endpoint | Auth | Body | Réponse |
 |---------|----------|------|------|---------|
 | POST | `/api/ai/profile-chat` | JWT student | `{ messages: [{role, content}] }` | `{ success, data: { reply, retrieved[] } }` |
+
+### Agents IA côté Entreprise — Candidate Ranker & Contact Message
+
+Deux agents Mistral dédiés à l'espace recruteur, orchestrés sur la vue Kanban des candidatures.
+
+**Candidate Ranker** (`backend/src/services/agents/candidateRankerAgent.ts`)
+- Charge toutes les candidatures actives d'une offre (ownership check côté controller)
+- Construit le profil étudiant depuis `user.profile` (fullName, education, skills, interests, location)
+- Appelle le **Matcher Chain-of-Thought** en parallèle via `Promise.all` pour chaque couple (profil, offre)
+- Trie décroissant par score, retourne `{ ranked: [...], failures, totalApplications }`
+- Les échecs isolés sont loggés et filtrés — la liste reste exploitable même en cas de timeout partiel
+- Pondération héritée du Matcher : compétences 50%, expérience 30%, formation 20%
+
+**Contact Message** (`backend/src/services/agents/contactMessageAgent.ts`)
+- Mode JSON strict : `response_format: { type: 'json_object' }` pour garantir `{ subject, body }` parseables
+- 5 types avec `intent` / `tone` / `instructions` spécifiques :
+
+| Type | Ton | Objectif |
+|------|-----|----------|
+| `INVITATION_INTERVIEW` | Chaleureux, professionnel | Inviter à un entretien sans fixer de date précise |
+| `MAKE_OFFER` | Enthousiaste, clair | Proposer le stage sans inventer de chiffres |
+| `REQUEST_INFO` | Poli, concis | Poser 1-2 questions ouvertes ciblées |
+| `FOLLOW_UP` | Courtois, léger | Relancer sans s'excuser longuement |
+| `POLITE_REJECTION` | Respectueux, bienveillant | Remercier + encourager sans critiquer |
+
+- 8 contraintes permanentes dans le system prompt (longueur 80-150 mots, interdiction de promettre salaire/date/poste, signature générique `[Équipe {company}]`, anti-biais, etc.)
+- Champ `extraNote` optionnel passé par le recruteur pour guider la rédaction
+- **Input Guardrails** appliqués sur `extraNote`, **Output Filter** sur `subject` ET `body` (PII masking, bias detection, sensitive action blocking)
+
+**UI entreprise** (`components/company/`)
+- `ApplicationKanban.tsx` : sélecteur d'offre + bouton "Classer par IA" en header, tri auto par score dans chaque colonne
+- `ApplicationCard.tsx` : badge score coloré (🟢 ≥75 · 🟡 ≥50 · ⚪ <50) + bouton "Contacter" discret
+- `ContactCandidateModal.tsx` : grille de 5 boutons typés → génération immédiate → édition → copie ou enregistrement comme note (merge avec notes existantes)
+- Badges `Agent Mistral · Contact` + `HITL` toujours visibles pour transparence
+
+**Principe de design "un clic, sans formulaire complexe"** :
+1. Le manager voit la carte du candidat, clique "Contacter"
+2. Choisit le type de message dans une grille visuelle (pas de formulaire à remplir)
+3. L'agent génère immédiatement, pas de champs obligatoires à renseigner
+4. Note facultative possible avant génération pour orienter l'agent
+
+---
 
 ### Guardrails de Sécurité IA — Détails
 
@@ -336,6 +389,8 @@ Upload CV (PDF/image)
 | POST | `/api/ai/agents/cv-pipeline` | Pipeline complet — `multipart/form-data` avec champ `cv` |
 | POST | `/api/ai/agents/find-matches` | **AI Matcher end-to-end** — RAG shortlist + CoT parallèle, body `{ cvAnalysis?, chatContext?, limit? }` |
 | POST | `/api/ai/agents/draft-cover-letter` | **Agent HITL** — rédige une lettre de motivation pour validation humaine, body `{ internshipId, cvAnalysis?, chatContext? }` |
+| POST | `/api/company/agents/rank-candidates` | **Ranker entreprise** — classe toutes les candidatures d'une offre par score Matcher, body `{ internshipId }` |
+| POST | `/api/company/agents/draft-contact-message` | **Contact entreprise** — génère un message (5 types), body `{ applicationId, type, extraNote? }` |
 
 Tous sont authentifiés par JWT.
 
@@ -736,7 +791,11 @@ cd backend && npm run seed:chroma:reset
 | `backend/src/guardrails/sensitiveActions.ts` | Middleware confirmation destructive |
 | `backend/src/guardrails/types.ts` | Enums Severity, BiasType, ThreatType, PIIKind |
 | `backend/src/services/agents/coverLetterAgent.ts` | Agent HITL — lettre de motivation + filtrage |
+| `backend/src/services/agents/candidateRankerAgent.ts` | Agent entreprise — classement automatique candidats (parallèle) |
+| `backend/src/services/agents/contactMessageAgent.ts` | Agent entreprise — contact en 1 clic (5 types, JSON mode) |
+| `backend/src/controllers/companyAgentsController.ts` | Handlers + ownership checks des agents entreprise |
 | `components/HITLApplyModal.tsx` | UI validation humaine avant envoi de candidature |
+| `components/company/ContactCandidateModal.tsx` | UI contact en un clic + édition + copie/note |
 | `backend/src/services/agents/mistralJsonClient.ts` | Helper JSON mode partagé par les 3 agents |
 | `backend/src/services/agents/cvAnalyzerAgent.ts` | Agent Few-shot + ATS |
 | `backend/src/services/agents/matcherAgent.ts` | Agent Chain-of-Thought |
