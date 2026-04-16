@@ -47,6 +47,12 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
   - **Matcher** (Chain-of-Thought) : scoring pondéré 50/30/20 (compétences/expérience/formation) vs offres
   - OCR hybride : PDF via `pdf-parse`, images via Pixtral vision
   - Injection automatique de la conversation InternCoach dans le contexte des agents
+- ✅ **AI Matcher End-to-End** (page Finder)
+  - Merge automatique de 3 sources : profil DB + CV Analyzer + conversation InternCoach
+  - Stratégie à deux étages : RAG `mistral-embed` pour shortlister top 10 → Matcher CoT pour scorer précisément
+  - Top 5 offres ranked avec justification Chain-of-Thought dépliable
+  - Badges d'état "Analyse CV disponible" / "Conversation InternCoach disponible" pour transparence
+  - Garde-fou : refus si profil trop vide (invite à uploader CV ou discuter avec InternCoach)
 
 ### Espace Entreprise
 - ✅ Authentification entreprise (SIRET, nom, secteur)
@@ -253,8 +259,21 @@ Upload CV (PDF/image)
 | POST | `/api/ai/agents/matcher` | Agent seul — body `{ jobOffer, studentProfile?, chatContext? }` |
 | POST | `/api/ai/agents/recommender` | Agent seul — body `{ studentProfile?, chatContext? }` |
 | POST | `/api/ai/agents/cv-pipeline` | Pipeline complet — `multipart/form-data` avec champ `cv` |
+| POST | `/api/ai/agents/find-matches` | **AI Matcher end-to-end** — RAG shortlist + CoT parallèle, body `{ cvAnalysis?, chatContext?, limit? }` |
 
 Tous sont authentifiés par JWT.
+
+### AI Matcher End-to-End — stratégie à deux étages
+
+L'endpoint `find-matches` combine retrieval rapide + scoring précis :
+
+1. **Merge du profil étudiant** côté serveur : union de (profil DB) + (résultats CV Analyzer) + (interests).
+2. **Shortlist** (~10 offres) via `mistral-embed` cosine similarity sur l'index in-memory des stages actifs. Fallback SQL si le RAG échoue.
+3. **Scoring précis** en parallèle (`Promise.all`) : appel au Matcher agent (Chain-of-Thought, pondération 50/30/20) sur chaque offre shortlistée, avec le transcript chat injecté.
+4. **Tri décroissant** + slice top N (1–10, défaut 5).
+5. Retour : `{ matches: [{ id, title, companyName, score, justification, ... }], usedProfile }` (`usedProfile` = profil mergé utilisé, pour transparence côté UI).
+
+**Garde-fou** : si le profil mergé est vide (pas de compétences, pas de formation, pas d'intérêts), erreur 400 invitant l'étudiant à uploader un CV ou discuter avec InternCoach.
 
 ### Flux de données — conversation InternCoach → agents
 
@@ -289,9 +308,12 @@ System prompt enrichi : "Conversation InternCoach: [...]"
 | `backend/src/services/agents/recommenderAgent.ts` | Constrained recommendations |
 | `backend/src/services/agents/cvExtractorService.ts` | OCR hybride (pdf-parse + Pixtral) |
 | `backend/src/services/agents/cvPipelineOrchestrator.ts` | Orchestrateur (extract → analyze → reco) |
+| `backend/src/services/agents/findMatchesOrchestrator.ts` | Orchestrateur Matcher (RAG shortlist + CoT scoring parallèle) |
 | `backend/src/controllers/agentsController.ts` | Handlers + validation Zod |
 | `components/CVAnalyzerPipeline.tsx` | UI upload + affichage résultats |
-| `services/chatStore.ts` | Persistance localStorage + formatage transcript |
+| `components/InternshipFinder.tsx` | UI AI Matcher (badges + score + justification CoT dépliable) |
+| `services/chatStore.ts` | Persistance localStorage conversation + formatage transcript |
+| `services/cvAnalysisStore.ts` | Persistance localStorage analyse CV |
 
 ### Dépendances ajoutées
 

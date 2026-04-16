@@ -21,6 +21,7 @@ Ce document détaille les phases de développement pour transformer le prototype
 - [x] Analyseur de Performance CV (StageMatch IA) ✅
 - [x] Agent Étudiant InternCoach (Chatbot Mistral + RAG) ✅
 - [x] Pipeline Multi-Agents Mistral (CV Analyzer + Matcher + Recommender) ✅
+- [x] AI Matcher end-to-end (shortlist RAG + CoT scoring sur offres réelles) ✅
 - [ ] Administration avancée
 - [ ] Fonctionnalités innovantes (Auto-Apply, Simulateur, Badges, etc.)
 - [ ] Vector Database pour matching sémantique (ChromaDB — actuellement RAG in-memory via mistral-embed)
@@ -398,6 +399,94 @@ Trois agents IA spécialisés orchestrés en pipeline, chacun exploitant une tec
 - `components/CVAnalyzerPipeline.tsx` (nouveau)
 - `components/ProfileChatbot.tsx` (sauvegarde localStorage)
 - `App.tsx` (tab CV Analyzer → `CVAnalyzerPipeline`)
+
+---
+
+## Phase 4.8 : AI Matcher End-to-End (RAG Shortlist + CoT Scoring) ✅ (Complété)
+
+Matching intelligent des offres d'entreprise sur l'onglet **Finder**, qui combine trois sources de données étudiant et utilise une stratégie à deux étages (retrieval rapide puis scoring précis).
+
+### Objectif
+Partir des offres réelles publiées par les entreprises et, pour chaque étudiant connecté, calculer un score de compatibilité précis en tenant compte simultanément de :
+1. Son **profil DB** (compétences, intérêts, formation, localisation)
+2. Les **résultats du CV Analyzer** (compétences extraites, expérience, formation détectées)
+3. La **transcription de la conversation InternCoach** (aspirations, contraintes exprimées, domaine visé)
+
+### 4.8.1 Persistance multi-sources côté client
+- [x] `services/chatStore.ts` : conversation InternCoach en localStorage (déjà existant)
+- [x] `services/cvAnalysisStore.ts` (nouveau) : sortie du CV Analyzer sauvegardée automatiquement après upload
+- [x] Injection automatique des deux sources dans `api.findMatches()` (pas d'effort côté composant appelant)
+
+### 4.8.2 Orchestrateur find-matches (backend)
+- [x] `backend/src/services/agents/findMatchesOrchestrator.ts`
+- [x] **Merge du profil** : union des compétences DB + CV + fallbacks
+- [x] **Stratégie deux étages** :
+  1. *Shortlist* via RAG `retrieveRelevantInternships` (top 10, cosine sur `mistral-embed`)
+  2. *Fallback SQL* si RAG vide (10 dernières offres actives)
+  3. *Scoring précis* par appels parallèles au Matcher agent (Chain-of-Thought)
+  4. Tri score décroissant, slice top N (défaut 5, max 10)
+- [x] Les échecs isolés (une offre qui plante) n'arrêtent pas le pipeline (retour `null` filtré)
+- [x] Passe la transcription chat à chaque invocation Matcher
+
+### 4.8.3 Validation & endpoint
+- [x] Schéma Zod côté controller : `studentProfile?`, `cvAnalysis?`, `chatContext?`, `limit? (1-10)`
+- [x] Garde-fou : refus avec 400 si profil vide (pas de compétences, pas de formation, pas d'intérêts)
+- [x] Retour : `{ matches[], usedProfile }` (usedProfile = profil mergé réellement utilisé, pour transparence)
+
+### 4.8.4 Interface Finder repensée
+- [x] `components/InternshipFinder.tsx` — remplace l'ancien appel Gemini `matchInternships` par `findMatches`
+- [x] Badges d'état au-dessus du bouton : "Analyse CV disponible" / "Conversation InternCoach disponible"
+- [x] Carte par offre : score %, localisation, durée, skills, justification CoT tronquée avec bouton "Voir le raisonnement complet"
+- [x] CTA "Postuler" branché sur le flux de candidature existant
+
+### Endpoint
+
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| POST | `/api/ai/agents/find-matches` | Body `{ studentProfile?, cvAnalysis?, chatContext?, limit? }` → `{ matches[], usedProfile }` |
+
+### Flux de données
+
+```
+CV Analyzer (upload)          Chat InternCoach
+     │                              │
+     ▼                              ▼
+ localStorage                   localStorage
+"internmatch.cv.analysis"   "internmatch.profile.chat"
+     │                              │
+     └──────────┬───────────────────┘
+                ▼
+      api.findMatches(5) — auto-inject
+                │
+                ▼
+POST /api/ai/agents/find-matches
+                │
+                ▼
+┌───────────────────────────────────────┐
+│ Merge profil DB + CV + (interests)    │
+└───────────────┬───────────────────────┘
+                ▼
+┌───────────────────────────────────────┐
+│ RAG shortlist (mistral-embed, top 10) │
+└───────────────┬───────────────────────┘
+                ▼
+┌───────────────────────────────────────┐
+│ Matcher CoT en parallèle sur shortlist│
+│ — pondération 50/30/20                │
+│ — contexte chat injecté               │
+└───────────────┬───────────────────────┘
+                ▼
+Tri score desc → top 5 → UI
+```
+
+### Fichiers ajoutés / modifiés
+- `services/cvAnalysisStore.ts` (nouveau)
+- `services/api.ts` (méthode `findMatches`)
+- `components/CVAnalyzerPipeline.tsx` (sauvegarde localStorage après upload)
+- `components/InternshipFinder.tsx` (réécrit pour Mistral Matcher + badges + justification CoT)
+- `backend/src/services/agents/findMatchesOrchestrator.ts` (nouveau)
+- `backend/src/controllers/agentsController.ts` (handler `runFindMatches` + schéma Zod)
+- `backend/src/routes/aiRoutes.ts` (route `/agents/find-matches`)
 
 ---
 
