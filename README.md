@@ -8,16 +8,7 @@ Plateforme intelligente de matching stages/étudiants avec **IA Agentique**.
 
 **Objectif** : Écosystème intelligent et interactif capable de raisonner, planifier et exécuter des tâches complexes de manière autonome ou semi-autonome.
 
-### Critères d'Évaluation
-| Critère | Poids | Statut |
-|---------|-------|--------|
-| Innovation & Impacts | 30% | ✅ |
-| Qualité Technique & Orchestration | 25% | ✅ |
-| Sécurité & Fiabilité (Guardrails/HITL) | 20% | ✅ |
-| Interfaces (UI Web & Mobile) | 15% | ✅ Web / ✅ PWA Mobile |
-| Présentation & Démo Live | 10% | ✅ |
 
----
 
 ## Fonctionnalités Implémentées
 
