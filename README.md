@@ -8,15 +8,6 @@ Plateforme intelligente de matching stages/étudiants propulsée par **Mistral A
 
 **Objectif** : Ecosystème intelligent capable de raisonner, planifier et exécuter des tâches complexes de manière autonome ou semi-autonome.
 
-| Critère | Poids |
-|---------|-------|
-| Innovation & Impacts | 30% |
-| Qualité Technique & Orchestration | 25% |
-| Sécurité & Fiabilité (Guardrails/HITL) | 20% |
-| Interfaces (UI Web & Mobile) | 15% |
-| Présentation & Démo Live | 10% |
-
----
 
 ## Stack Technique
 
