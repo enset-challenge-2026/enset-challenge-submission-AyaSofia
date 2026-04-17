@@ -8,6 +8,15 @@ Plateforme intelligente de matching stages/étudiants propulsée par **Mistral A
 
 **Objectif** : Ecosystème intelligent capable de raisonner, planifier et exécuter des tâches complexes de manière autonome ou semi-autonome.
 
+| Critère | Poids |
+|---------|-------|
+| Innovation & Impacts | 30% |
+| Qualité Technique & Orchestration | 25% |
+| Sécurité & Fiabilité (Guardrails/HITL) | 20% |
+| Interfaces (UI Web & Mobile) | 15% |
+| Présentation & Démo Live | 10% |
+
+---
 
 ## Stack Technique
 
@@ -75,8 +84,9 @@ Tous les agents utilisent **Mistral AI** via l'API REST (`/v1/chat/completions` 
 | **CV Analyzer** | Few-shot (2 exemples) + JSON mode | `services/agents/cvAnalyzerAgent.ts` |
 | **Matcher** | Chain-of-Thought (4 étapes, pondération 50/30/20) | `services/agents/matcherAgent.ts` |
 | **Recommender** | Constrained (5 contraintes : gratuit, Maroc, anti-hallucination) | `services/agents/recommenderAgent.ts` |
+| **Cover Letter Writer** | Texte libre, 8 contraintes | `services/agents/coverLetterAgent.ts` |
 | **Candidate Ranker** | Matcher en parallèle sur N candidats | `services/agents/candidateRankerAgent.ts` |
-
+| **Contact Message** | JSON mode, 5 types avec tone/intent spécifiques | `services/agents/contactMessageAgent.ts` |
 
 ### Pipeline InternCoach (chatbot + RAG)
 
